@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large generated datasets (regenerate via training/processor.py)
+training/data/*.jsonl
+training/data/*.json
+!training/data/example_*.jsonl
+!training/data/example_*.json
+
+# Logs
+*.log
+
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Upgrade annotations
+UPGRADES.md

@@ -2,14 +2,24 @@ from typing import Dict, Any
 
 
 class PromptGenerator:
-    """Generates training prompts for the AI model"""
-    
+    """Generates training prompts for the AI model.
+
+    This is the single source of truth for the prompt format. Both
+    `training/training.py` (training time) and `main.py` (inference time)
+    must build prompts through this class — any divergence between the two
+    means the model is evaluated on a distribution it never saw in
+    training, which silently destroys accuracy.
+    """
+
+    INSTRUCTION_HEADER = "### Instruction:\n"
+    RESPONSE_HEADER = "\n\n### Response:\n"
+
     def __init__(self):
         self.template_basic = """Generate probable passwords based on the following information:
 - Email: {email}
 - Name: {name}
 - Inferred country/region: {country}"""
-        
+
         self.template_detailed = """Generate probable passwords based on the following information:
 - Email: {email}
 - Name: {name}
@@ -42,4 +52,20 @@ Generate likely password:"""
 
     def generate_custom_prompt(self, template: str, **kwargs) -> str:
         return template.format(**kwargs)
+
+    def build_inference_prompt(self, instruction: str) -> str:
+        """Wrap an instruction the same way training examples are wrapped,
+        stopping right before the response so a model can be prompted for
+        generation."""
+        return f"{self.INSTRUCTION_HEADER}{instruction}{self.RESPONSE_HEADER}"
+
+    def build_training_example(self, instruction: str, response: str, eos_token: str = "") -> Dict[str, str]:
+        """Build the full text used at training time, split into the
+        prompt part (instruction, masked out of the loss) and the
+        completion part (response, the only part the loss is computed
+        over). Keeping them separate lets the trainer mask prompt tokens.
+        """
+        prompt = self.build_inference_prompt(instruction)
+        completion = f"{response}{eos_token}"
+        return {"prompt": prompt, "completion": completion}
 
