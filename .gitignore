@@ -9,8 +9,12 @@ dist/
 
 # Virtual environments
 .venv/
+.venv*
 venv/
 env/
+
+# Models
+model*
 
 # Environment / secrets
 .env
@@ -25,6 +29,7 @@ env/
 Thumbs.db
 
 # Large generated datasets (regenerate via training/processor.py)
+training/data/*
 training/data/*.jsonl
 training/data/*.json
 !training/data/example_*.jsonl
