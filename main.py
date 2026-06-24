@@ -8,13 +8,16 @@ template it never saw during training — that mismatch alone was enough to
 make generations look random.
 """
 import argparse
+import logging
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "training"))
-from data_processor.personal_info_extractor import PersonalInfoExtractor
 from data_processor.country_inferrer import CountryInferrer
+from data_processor.personal_info_extractor import PersonalInfoExtractor
 from data_processor.prompt_generator import PromptGenerator
+
+logger = logging.getLogger("aya.inference")
 
 
 def parse_arguments():
@@ -42,20 +45,22 @@ def build_prompt(email: str) -> str:
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
     args = parse_arguments()
 
     try:
-        from transformers import AutoTokenizer, AutoModelForCausalLM
         from peft import PeftModel
+        from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError as exc:
-        print(f"Missing dependency: {exc}. Run: pip install -r requirements.txt")
+        logger.error("Missing dependency: %s. Run: pip install -r requirements.txt", exc)
         sys.exit(1)
 
     if not os.path.isdir(args.model_path):
-        print(f"Error: model_path '{args.model_path}' does not exist. Train a model first (see training/training.py).")
+        logger.error("model_path '%s' does not exist. Train a model first (see training/training.py).", args.model_path)
         sys.exit(1)
 
-    print(f"Loading base model: {args.base_model}")
+    logger.info("Loading base model: %s", args.base_model)
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
     base_model = AutoModelForCausalLM.from_pretrained(args.base_model)
     model = PeftModel.from_pretrained(base_model, args.model_path)
@@ -64,7 +69,7 @@ def main():
     prompt = build_prompt(args.email)
     inputs = tokenizer(prompt, return_tensors="pt")
 
-    print(f"\nGenerating {args.num_candidates} password candidates for {args.email}...\n")
+    logger.info("Generating %d password candidates for %s...", args.num_candidates, args.email)
     outputs = model.generate(
         **inputs,
         max_new_tokens=args.max_new_tokens,

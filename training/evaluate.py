@@ -13,11 +13,14 @@ pairs, e.g. the `test` split saved alongside a training run) and reports:
 """
 import argparse
 import json
+import logging
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from data_processor.prompt_generator import PromptGenerator
+
+logger = logging.getLogger("aya.evaluate")
 
 
 def parse_arguments():
@@ -53,7 +56,7 @@ def levenshtein(a: str, b: str) -> int:
 
 
 def load_eval_examples(path: str, max_examples: int):
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     return data[:max_examples]
 
@@ -80,12 +83,14 @@ def generate_candidates(model, tokenizer, prompt: str, top_k: int, max_new_token
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
     args = parse_arguments()
 
-    from transformers import AutoTokenizer, AutoModelForCausalLM
     from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    print(f"Loading base model: {args.base_model}")
+    logger.info("Loading base model: %s", args.base_model)
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
     base_model = AutoModelForCausalLM.from_pretrained(args.base_model)
     model = PeftModel.from_pretrained(base_model, args.model_path)
@@ -93,7 +98,7 @@ def main():
 
     prompt_generator = PromptGenerator()
     examples = load_eval_examples(args.eval_dataset, args.max_examples)
-    print(f"Evaluating on {len(examples)} held-out examples...")
+    logger.info("Evaluating on %d held-out examples...", len(examples))
 
     exact_matches = 0
     top_k_hits = 0
@@ -114,7 +119,7 @@ def main():
         edit_distances.append(best_distance)
 
         if i % 20 == 0:
-            print(f"  ...{i}/{len(examples)} processed")
+            logger.info("  ...%d/%d processed", i, len(examples))
 
     n = len(examples) or 1
     print("\n=== Evaluation Results ===")

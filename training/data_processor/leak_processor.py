@@ -1,17 +1,19 @@
 import json
 import logging
-from pathlib import Path
-from typing import Optional, Dict, Any, List, Iterator, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing as mp
-from .personal_info_extractor import PersonalInfoExtractor
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Any
+
 from .country_inferrer import CountryInferrer
-from .prompt_generator import PromptGenerator
 from .data_validator import DataValidator
+from .personal_info_extractor import PersonalInfoExtractor
+from .prompt_generator import PromptGenerator
 
 
 class LeakProcessor:
-    def __init__(self, max_workers: Optional[int] = None):
+    def __init__(self, max_workers: int | None = None):
         self.max_workers = max_workers or min(32, (mp.cpu_count() or 1) + 4)
         self.personal_extractor = PersonalInfoExtractor()
         self.country_inferrer = CountryInferrer()
@@ -24,7 +26,7 @@ class LeakProcessor:
             'valid_entries': 0
         }
 
-    def process_single_entry(self, email: str, password: str) -> Optional[Dict[str, Any]]:
+    def process_single_entry(self, email: str, password: str) -> dict[str, Any] | None:
         try:
             if not self.validator.validate_entry(email, password)[0]:
                 return None
@@ -45,9 +47,9 @@ class LeakProcessor:
         except Exception:
             return None
 
-    def _read_file_chunked(self, input_file: str, chunk_size: int = 10000) -> Iterator[List[str]]:
+    def _read_file_chunked(self, input_file: str, chunk_size: int = 10000) -> Iterator[list[str]]:
         try:
-            with open(input_file, 'r', encoding='utf-8', errors='ignore') as file:
+            with open(input_file, encoding='utf-8', errors='ignore') as file:
                 chunk = []
                 for line in file:
                     chunk.append(line.strip())
@@ -56,11 +58,11 @@ class LeakProcessor:
                         chunk = []
                 if chunk:
                     yield chunk
-        except (FileNotFoundError, IOError) as e:
+        except (OSError, FileNotFoundError) as e:
             logging.error(f"Error reading file {input_file}: {e}")
             return
 
-    def _process_chunk(self, chunk: List[str]) -> Tuple[List[Dict[str, Any]], int, int]:
+    def _process_chunk(self, chunk: list[str]) -> tuple[list[dict[str, Any]], int, int]:
         valid_entries = []
         processed_count = 0
         error_count = 0
@@ -85,7 +87,7 @@ class LeakProcessor:
         
         return valid_entries, processed_count, error_count
 
-    def process_file(self, input_file: str, output_file: str, max_entries: Optional[int] = None, 
+    def process_file(self, input_file: str, output_file: str, max_entries: int | None = None, 
                     chunk_size: int = 10000, write_batch_size: int = 1000) -> None:
         
         logging.info(f"Processing leak file: {input_file}")
@@ -138,18 +140,18 @@ class LeakProcessor:
         
         self._log_stats()
 
-    def _write_batch(self, batch: List[Dict[str, Any]], file_handle) -> None:
+    def _write_batch(self, batch: list[dict[str, Any]], file_handle) -> None:
         for item in batch:
             file_handle.write(json.dumps(item, ensure_ascii=False, separators=(',', ':')) + '\n')
         file_handle.flush()
 
-    def process_file_sequential(self, input_file: str, output_file: str, max_entries: Optional[int] = None) -> None:
+    def process_file_sequential(self, input_file: str, output_file: str, max_entries: int | None = None) -> None:
         dataset = []
         
         logging.info(f"Processing leak file sequentially: {input_file}")
         
         try:
-            with open(input_file, 'r', encoding='utf-8', errors='ignore') as file:
+            with open(input_file, encoding='utf-8', errors='ignore') as file:
                 for line_num, line in enumerate(file, 1):
                     if max_entries and self.stats['processed'] >= max_entries:
                         break
@@ -177,14 +179,14 @@ class LeakProcessor:
                         self.stats['processed'] += 1
                         continue
         
-        except (FileNotFoundError, IOError) as e:
+        except (OSError, FileNotFoundError) as e:
             logging.error(f"Error reading input file: {e}")
             return
         
         self._save_dataset(dataset, output_file)
         self._log_stats()
 
-    def _save_dataset(self, dataset: List[Dict], output_file: str) -> None:
+    def _save_dataset(self, dataset: list[dict], output_file: str) -> None:
         Path(output_file).parent.mkdir(parents=True, exist_ok=True)
         
         try:
@@ -197,7 +199,7 @@ class LeakProcessor:
             logging.error(f"Error writing output file: {e}")
 
     def _log_stats(self) -> None:
-        logging.info(f"Processing completed:")
+        logging.info("Processing completed:")
         logging.info(f"  Total processed: {self.stats['processed']}")
         logging.info(f"  Valid entries: {self.stats['valid_entries']}")
         logging.info(f"  Errors: {self.stats['errors']}")

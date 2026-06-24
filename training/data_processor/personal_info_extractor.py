@@ -1,12 +1,11 @@
 import re
-from typing import Dict, List, Optional
 
 
 class PersonalInfoExtractor:
     """Extracts personal information from email addresses and usernames"""
     
     def __init__(self):
-        self.year_pattern = re.compile(r'(19|20)\d{2}')
+        self.year_pattern = re.compile(r'(?:19|20)\d{2}')
         self.number_pattern = re.compile(r'\d+')
         self.separator_pattern = re.compile(r'[._-]')
 
@@ -16,7 +15,7 @@ class PersonalInfoExtractor:
         name_clean = re.sub(r'\s+', ' ', name_clean).strip()
         return name_clean
 
-    def extract_name_parts(self, name: str) -> Dict[str, str]:
+    def extract_name_parts(self, name: str) -> dict[str, str]:
         """Extract first name, last name, and middle names"""
         info = {}
         name_parts = name.split()
@@ -31,16 +30,15 @@ class PersonalInfoExtractor:
         
         return info
 
-    def extract_numbers(self, text: str) -> List[str]:
+    def extract_numbers(self, text: str) -> list[str]:
         """Extract all numbers from text"""
         return self.number_pattern.findall(text)
 
-    def extract_years(self, text: str) -> List[str]:
+    def extract_years(self, text: str) -> list[str]:
         """Extract potential birth years (19XX, 20XX)"""
-        matches = self.year_pattern.findall(text)
-        return [match[0] + match[1] for match in matches]
+        return self.year_pattern.findall(text)
 
-    def analyze_username_patterns(self, username: str) -> Dict[str, any]:
+    def analyze_username_patterns(self, username: str) -> dict[str, any]:
         """Analyze username for common patterns"""
         patterns = {
             'has_numbers': bool(self.number_pattern.search(username)),
@@ -51,7 +49,7 @@ class PersonalInfoExtractor:
         }
         return patterns
 
-    def extract_personal_info(self, email: str) -> Dict[str, any]:
+    def extract_personal_info(self, email: str) -> dict[str, any]:
         """Extract comprehensive personal information from email"""
         username = email.split('@')[0] if '@' in email else email
         name_clean = self.clean_name(username)

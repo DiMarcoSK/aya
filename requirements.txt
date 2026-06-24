@@ -5,3 +5,4 @@ datasets>=2.18.0
 accelerate>=0.29.0
 tldextract>=5.1.0
 langdetect>=1.0.9
+pyyaml>=6.0

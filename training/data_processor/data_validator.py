@@ -1,5 +1,4 @@
 import re
-from typing import Tuple, Optional
 
 
 class DataValidator:
@@ -30,7 +29,7 @@ class DataValidator:
         
         return True
 
-    def validate_entry(self, email: str, password: str) -> Tuple[bool, Optional[str]]:
+    def validate_entry(self, email: str, password: str) -> tuple[bool, str | None]:
         """Validate complete entry and return status with error message"""
         if not self.validate_email(email):
             return False, f"Invalid email format: {email}"
@@ -40,7 +39,7 @@ class DataValidator:
         
         return True, None
 
-    def clean_entry(self, line: str) -> Tuple[Optional[str], Optional[str]]:
+    def clean_entry(self, line: str) -> tuple[str | None, str | None]:
         """Clean and extract email:password from line"""
         line = line.strip()
         if not line or ':' not in line:

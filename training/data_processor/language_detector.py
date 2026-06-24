@@ -1,6 +1,4 @@
-import re
-from typing import Optional, Dict, List
-from langdetect import detect, LangDetectException
+from langdetect import LangDetectException, detect
 
 
 class LanguageDetector:
@@ -37,7 +35,7 @@ class LanguageDetector:
             'hi': 'India'
         }
 
-    def detect_language(self, text: str) -> Optional[str]:
+    def detect_language(self, text: str) -> str | None:
         """Detect language of given text"""
         try:
             if len(text.strip()) < 3:
@@ -46,11 +44,11 @@ class LanguageDetector:
         except (LangDetectException, Exception):
             return None
 
-    def get_country_by_language(self, language: str) -> Optional[str]:
+    def get_country_by_language(self, language: str) -> str | None:
         """Get country/region by language code"""
         return self.lang_to_country.get(language)
 
-    def get_languages_from_text(self, texts: List[str]) -> List[str]:
+    def get_languages_from_text(self, texts: list[str]) -> list[str]:
         """Get languages from multiple text sources"""
         languages = []
         for text in texts:

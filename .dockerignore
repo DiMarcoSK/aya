@@ -1,0 +1,10 @@
+.git
+__pycache__
+*.pyc
+.venv
+.pytest_cache
+.ruff_cache
+model/checkpoint-*
+training/data/*.jsonl
+training/data/*.json
+!training/data/example_*

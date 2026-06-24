@@ -1,5 +1,5 @@
+
 import tldextract
-from typing import Tuple, Optional, Dict
 
 
 class DomainAnalyzer:
@@ -45,16 +45,16 @@ class DomainAnalyzer:
             'id': 'Indonesia'
         }
 
-    def extract_domain_parts(self, domain: str) -> Tuple[str, str, str]:
+    def extract_domain_parts(self, domain: str) -> tuple[str, str, str]:
         """Extract subdomain, domain, and TLD from domain string"""
         extracted = tldextract.extract(domain.lower())
         return extracted.subdomain, extracted.domain, extracted.suffix
 
-    def get_country_by_tld(self, tld: str) -> Optional[str]:
+    def get_country_by_tld(self, tld: str) -> str | None:
         """Get country by TLD"""
         return self.tld_to_country.get(tld.lower())
 
-    def analyze_domain(self, domain: str) -> Dict[str, str]:
+    def analyze_domain(self, domain: str) -> dict[str, str]:
         """Analyze domain and return comprehensive information"""
         subdomain, domain_base, tld = self.extract_domain_parts(domain)
         

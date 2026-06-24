@@ -12,10 +12,12 @@ AYA is built upon the TinyLlama 1.1B parameter model, selected for its balance b
 
 ### Core Components
 
-1. **Data Preprocessing Pipeline**: Converts raw personal information into structured instruction-following format
-2. **LoRA Fine-tuning Engine**: Implements parameter-efficient adaptation of the base language model
-3. **Inference System**: Generates password candidates based on input personal information
-4. **Evaluation Framework**: Assesses generated password quality and relevance
+1. **Data Preprocessing Pipeline**: Converts raw personal information into structured instruction-following format (`training/data_processor/`)
+2. **LoRA Fine-tuning Engine**: Implements parameter-efficient adaptation of the base language model (`training/training.py`, config in `configs/lora_default.yaml`)
+3. **Inference System**: Generates password candidates based on input personal information (`main.py`)
+4. **Evaluation Framework**: Measures exact-match rate, top-k hit-rate, and edit distance against a held-out set (`training/evaluate.py`)
+
+See [UPGRADES.md](UPGRADES.md) for the architectural rationale behind these components and the bugs that were found and fixed along the way (prompt template mismatch between training/inference, uncorrelated synthetic passwords, a regex bug in birth-year extraction).
 
 ## System Requirements
 
@@ -30,11 +32,14 @@ AYA is built upon the TinyLlama 1.1B parameter model, selected for its balance b
 
 ### Software Dependencies
 
-The system requires Python 3.8 or higher with the following packages:
+The system requires Python 3.10 or higher.
 
 ```bash
-pip install torch transformers datasets peft accelerate
+pip install -r requirements.txt        # runtime only
+pip install -r requirements-dev.txt    # + pytest, ruff, black, pre-commit
 ```
+
+`Makefile` wraps the common commands (`make install-dev`, `make test`, `make lint`, `make train`, `make evaluate`). A `Dockerfile` is provided for a reproducible CPU-only environment.
 
 For CPU-only deployments, ensure PyTorch installation excludes CUDA dependencies to minimize resource utilization.
 
@@ -64,11 +69,18 @@ Utilization of publicly available, anonymized password breach datasets with pers
 For testing purposes, i recommend using at least 10,000 samples, that can be generated using **data_processor** module
 
 ```bash
-
-usage@example:~$ cd training
-usage@example:~$ python3 processor.py --generate 20000 --output data/20k_leak.txt
-Generated 20000 synthetic leaks to generated_leaks_20.txt
+cd training
+python3 processor.py --generate 20000 --output data/20k_leak.txt --seed 42
+python3 processor.py data/20k_leak.txt data/20k_leak.jsonl
+python3 processor.py --convert data/20k_leak.jsonl --output data/20k_leak_alpaca.json
 ```
+
+`--seed` makes synthetic generation reproducible. Generated passwords are
+statistically correlated with the identity used to build the email (name,
+birth year, country) — see `RealisticLeakGenerator._generate_password` in
+`training/data_processor/leak_generator.py` — instead of being independent
+random strings, which is what previously made the model unable to learn
+anything useful from the dataset.
 
 Note: Feeding it with few samples will make you see the typical behavior of a poorly fed LoRA due to lack of data: it is turning into a "parrot mode", repeating generic placeholders (<PASSWORD>, <EMAIL>), because it does not have enough statistical context to learn real patterns.
 
@@ -82,25 +94,43 @@ Note: Feeding it with few samples will make you see the typical behavior of a po
 
 ### LoRA Hyperparameters
 
-The following configuration has been optimized for CPU-only training environments:
+Defaults live in [`configs/lora_default.yaml`](configs/lora_default.yaml) — the single source of truth for "what we normally run" — and can be overridden per-run with CLI flags:
 
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| `num_train_epochs` | 2-3 | Prevents overfitting on small datasets |
-| `learning_rate` | 2e-4 to 5e-4 | Stable convergence for LoRA adaptation |
-| `gradient_accumulation_steps` | 16+ | Simulates larger batch sizes in memory-constrained environments |
-| `per_device_train_batch_size` | 1 | Minimizes memory usage |
-| `lora_r` | 8-16 | Balances adaptation capacity with efficiency |
+| Parameter | Default | Rationale |
+|-----------|---------|-----------|
+| `num_epochs` | 2 | Prevents overfitting on small datasets |
+| `learning_rate` | 2e-4 | Stable convergence for LoRA adaptation |
+| `gradient_accumulation_steps` | 16 | Simulates larger batch sizes in memory-constrained environments |
+| `batch_size` | 1 | Minimizes memory usage |
+| `lora_r` | 16 | Balances adaptation capacity with efficiency |
 | `lora_alpha` | 32 | Scaling factor for LoRA weights |
+| `lora_dropout` | 0.05 | Regularization for small datasets |
+| `eval_split` | 0.05 | Held-out fraction for `training/evaluate.py` |
+| `seed` | 42 | Reproducibility (`transformers.set_seed`) |
+
+LoRA targets attention **and** MLP projections (`q/k/v/o_proj` + `gate/up/down_proj`) — attention-only adaptation proved too low-capacity for this task. Loss is masked so gradients only flow from the password completion, not the instruction text, and padding is dynamic per-batch instead of a fixed `max_length`, which meaningfully cuts training time. See [UPGRADES.md](UPGRADES.md) for details.
 
 ### Training Command Example
 
 ```bash
-python training.py \
-    --model_name TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-tokenizer \
-    --dataset_path dataset_alpaca.json \
-    --output_dir ./model/
+python training/training.py \
+    --dataset_path training/data/20k_leak_alpaca.json \
+    --output_dir ./model
+
+# Override a config value for a one-off experiment:
+python training/training.py \
+    --dataset_path training/data/20k_leak_alpaca.json \
+    --output_dir ./model \
+    --num_epochs 3 --gradient_checkpointing
 ```
+
+### Evaluation
+
+```bash
+python training/evaluate.py --model_path ./model --eval_dataset ./model/eval_set.json
+```
+
+`eval_set.json` is written automatically by `training.py` from the held-out split, so it always matches examples the model never trained on. The script reports exact-match rate, top-k hit-rate, and average edit distance.
 
 ## Architecture
 
@@ -111,11 +141,29 @@ python training.py \
 │   Input         │    │   (LoRA Model)   │    │   Generation    │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
         │                                               │
-        │               ┌──────────────────┐           │
-        └──────────────▶│   Leak Dataset   │───────────┘
+        │               ┌──────────────────┐            │
+        └─────────────▶│   Leak Dataset   │───────────┘
                         │   (Preprocessed) │
                         └──────────────────┘
 ```
 
+## Inference
+
+```bash
+python main.py --email jean.pierre@lafrance.com --model_path ./model --num_candidates 5
+```
+
+Builds the prompt through the same `PersonalInfoExtractor` → `CountryInferrer` → `PromptGenerator` pipeline used at training time, so the model is always queried with a format it has actually seen.
+
+## Development
+
+```bash
+make install-dev   # runtime + dev deps, installs pre-commit hooks
+make lint          # ruff + black --check
+make format        # ruff --fix + black
+make test          # pytest (training/tests/)
+```
+
+CI (`.github/workflows/ci.yml`) runs lint and tests on every push/PR. `Dockerfile` builds a CPU-only image for reproducible runs.
 
 

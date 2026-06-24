@@ -1,0 +1,17 @@
+# Default LoRA fine-tuning configuration for AYA.
+# CLI flags in training/training.py override any value set here, so this
+# file is the single source of truth for "what we normally run", while the
+# CLI remains useful for one-off experiments.
+
+model_name: TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T
+max_length: 256
+batch_size: 1
+gradient_accumulation_steps: 16
+learning_rate: 0.0002
+num_epochs: 2
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+eval_split: 0.05
+gradient_checkpointing: false
+seed: 42

@@ -1,6 +1,5 @@
-from typing import List, Optional
-from .language_detector import LanguageDetector
 from .domain_analyzer import DomainAnalyzer
+from .language_detector import LanguageDetector
 
 
 class CountryInferrer:

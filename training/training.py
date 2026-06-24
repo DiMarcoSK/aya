@@ -13,56 +13,72 @@ Key design choices that differ from a naive SFT script, and why:
   same class used by the data pipeline and by `main.py` at inference time,
   so the model is never evaluated on a template it didn't train on.
 """
+import argparse
+import json
+import logging
 import os
 import sys
-import json
-import argparse
 from dataclasses import dataclass
-from typing import Dict, List
+from pathlib import Path
 
 import torch
 from datasets import load_dataset
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    TrainingArguments,
-    Trainer,
-)
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    Trainer,
+    TrainingArguments,
+    set_seed,
+)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from config import DEFAULT_CONFIG_PATH, load_yaml_config
 from data_processor.prompt_generator import PromptGenerator
+
+logger = logging.getLogger("aya.training")
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Fine-tune language model with LoRA")
-    parser.add_argument("--model_name", type=str, default="TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T",
+    # A first pass just to find --config before building the real parser,
+    # so YAML values can populate argparse defaults (CLI flags still win
+    # when explicitly passed).
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
+    config_args, remaining_argv = config_parser.parse_known_args()
+    defaults = load_yaml_config(config_args.config)
+
+    parser = argparse.ArgumentParser(description="Fine-tune language model with LoRA", parents=[config_parser])
+    parser.add_argument("--model_name", type=str, default=defaults.get("model_name", "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"),
                        help="Model name or path from HuggingFace Hub")
     parser.add_argument("--dataset_path", type=str, required=True,
                        help="Path to training dataset (JSON format)")
     parser.add_argument("--output_dir", type=str, required=True,
                        help="Directory to save the trained model")
-    parser.add_argument("--max_length", type=int, default=256,
+    parser.add_argument("--max_length", type=int, default=defaults.get("max_length", 256),
                        help="Maximum sequence length (prompt + completion)")
-    parser.add_argument("--batch_size", type=int, default=1,
+    parser.add_argument("--batch_size", type=int, default=defaults.get("batch_size", 1),
                        help="Training batch size per device")
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=16,
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=defaults.get("gradient_accumulation_steps", 16),
                        help="Number of gradient accumulation steps")
-    parser.add_argument("--learning_rate", type=float, default=2e-4,
+    parser.add_argument("--learning_rate", type=float, default=defaults.get("learning_rate", 2e-4),
                        help="Learning rate for training")
-    parser.add_argument("--num_epochs", type=int, default=2,
+    parser.add_argument("--num_epochs", type=int, default=defaults.get("num_epochs", 2),
                        help="Number of training epochs")
-    parser.add_argument("--lora_r", type=int, default=16,
+    parser.add_argument("--lora_r", type=int, default=defaults.get("lora_r", 16),
                        help="LoRA rank parameter")
-    parser.add_argument("--lora_alpha", type=int, default=32,
+    parser.add_argument("--lora_alpha", type=int, default=defaults.get("lora_alpha", 32),
                        help="LoRA alpha parameter")
-    parser.add_argument("--lora_dropout", type=float, default=0.05,
+    parser.add_argument("--lora_dropout", type=float, default=defaults.get("lora_dropout", 0.05),
                        help="LoRA dropout rate")
-    parser.add_argument("--eval_split", type=float, default=0.05,
+    parser.add_argument("--eval_split", type=float, default=defaults.get("eval_split", 0.05),
                        help="Fraction of data held out for evaluation (0 to disable)")
-    parser.add_argument("--gradient_checkpointing", action="store_true",
+    parser.add_argument("--gradient_checkpointing", action=argparse.BooleanOptionalAction,
+                       default=defaults.get("gradient_checkpointing", False),
                        help="Trade compute for memory; lets you raise batch size on CPU/low-VRAM GPUs")
-    return parser.parse_args()
+    parser.add_argument("--seed", type=int, default=defaults.get("seed", 42),
+                       help="Random seed for reproducibility")
+    return parser.parse_args(remaining_argv)
 
 
 def resolve_device_dtype():
@@ -74,14 +90,14 @@ def resolve_device_dtype():
 
 
 def load_model_and_tokenizer(model_name: str):
-    print(f"Loading tokenizer: {model_name}")
+    logger.info("Loading tokenizer: %s", model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     device, dtype = resolve_device_dtype()
-    print(f"Loading model: {model_name} (device={device}, dtype={dtype})")
+    logger.info("Loading model: %s (device=%s, dtype=%s)", model_name, device, dtype)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=dtype,
@@ -106,7 +122,7 @@ def setup_lora_config(lora_r: int, lora_alpha: int, lora_dropout: float) -> Lora
     )
 
 
-def tokenize_example(example: Dict, tokenizer, prompt_generator: PromptGenerator, max_length: int) -> Dict[str, List[int]]:
+def tokenize_example(example: dict, tokenizer, prompt_generator: PromptGenerator, max_length: int) -> dict[str, list[int]]:
     """Tokenize a single example with the prompt masked out of the loss.
 
     `labels` mirrors `input_ids` except prompt-token positions are set to
@@ -138,7 +154,7 @@ class DynamicPaddingCollator:
     fixed length, avoiding wasted compute on near-empty padded sequences."""
     pad_token_id: int
 
-    def __call__(self, batch: List[Dict[str, List[int]]]) -> Dict[str, torch.Tensor]:
+    def __call__(self, batch: list[dict[str, list[int]]]) -> dict[str, torch.Tensor]:
         max_len = max(len(item["input_ids"]) for item in batch)
 
         input_ids, attention_mask, labels = [], [], []
@@ -155,14 +171,14 @@ class DynamicPaddingCollator:
         }
 
 
-def prepare_dataset(dataset_path: str, tokenizer, max_length: int, eval_split: float, output_dir: str):
-    print(f"Loading dataset from: {dataset_path}")
+def prepare_dataset(dataset_path: str, tokenizer, max_length: int, eval_split: float, output_dir: str, seed: int):
+    logger.info("Loading dataset from: %s", dataset_path)
     dataset = load_dataset("json", data_files=dataset_path)["train"]
     prompt_generator = PromptGenerator()
 
     raw_train, raw_eval = dataset, None
     if eval_split and eval_split > 0 and len(dataset) > 20:
-        split = dataset.train_test_split(test_size=eval_split, seed=42)
+        split = dataset.train_test_split(test_size=eval_split, seed=seed)
         raw_train, raw_eval = split["train"], split["test"]
 
         # Persisted so `training/evaluate.py` measures the same held-out
@@ -171,7 +187,7 @@ def prepare_dataset(dataset_path: str, tokenizer, max_length: int, eval_split: f
         eval_path = os.path.join(output_dir, "eval_set.json")
         with open(eval_path, "w", encoding="utf-8") as f:
             json.dump(list(raw_eval), f, ensure_ascii=False, indent=2)
-        print(f"Held-out eval set ({len(raw_eval)} examples) saved to {eval_path}")
+        logger.info("Held-out eval set (%d examples) saved to %s", len(raw_eval), eval_path)
 
     train_dataset = raw_train.map(
         lambda example: tokenize_example(example, tokenizer, prompt_generator, max_length),
@@ -213,7 +229,11 @@ def create_training_arguments(args, device: str) -> TrainingArguments:
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
     args = parse_arguments()
+    set_seed(args.seed)
+    logger.info("Seed set to %d for reproducibility", args.seed)
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -226,7 +246,9 @@ def main():
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    train_dataset, eval_dataset = prepare_dataset(args.dataset_path, tokenizer, args.max_length, args.eval_split, args.output_dir)
+    train_dataset, eval_dataset = prepare_dataset(
+        args.dataset_path, tokenizer, args.max_length, args.eval_split, args.output_dir, args.seed
+    )
 
     training_args = create_training_arguments(args, device)
     data_collator = DynamicPaddingCollator(pad_token_id=tokenizer.pad_token_id)
@@ -239,10 +261,10 @@ def main():
         data_collator=data_collator,
     )
 
-    print("Starting training...")
+    logger.info("Starting training...")
     trainer.train()
 
-    print(f"Training completed, model saved to {args.output_dir}")
+    logger.info("Training completed, model saved to %s", args.output_dir)
     trainer.save_model()
     tokenizer.save_pretrained(args.output_dir)
 

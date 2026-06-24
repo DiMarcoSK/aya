@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Any
 
 
 class PromptGenerator:
@@ -37,7 +37,7 @@ Generate likely password:"""
             country=country
         )
 
-    def generate_detailed_prompt(self, email: str, personal_info: Dict[str, Any], country: str) -> str:
+    def generate_detailed_prompt(self, email: str, personal_info: dict[str, Any], country: str) -> str:
         prompt_data = {
             'email': email,
             'name': personal_info.get('cleaned_name', ''),
@@ -59,7 +59,7 @@ Generate likely password:"""
         generation."""
         return f"{self.INSTRUCTION_HEADER}{instruction}{self.RESPONSE_HEADER}"
 
-    def build_training_example(self, instruction: str, response: str, eos_token: str = "") -> Dict[str, str]:
+    def build_training_example(self, instruction: str, response: str, eos_token: str = "") -> dict[str, str]:
         """Build the full text used at training time, split into the
         prompt part (instruction, masked out of the loss) and the
         completion part (response, the only part the loss is computed
